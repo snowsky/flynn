@@ -398,6 +398,8 @@ const (
 	EventTypeDomainMigration      EventType = "domain_migration"
 	EventTypeClusterBackup        EventType = "cluster_backup"
 	EventTypeAppGarbageCollection EventType = "app_garbage_collection"
+	EventTypeSink                 EventType = "sink"
+	EventTypeSinkDeletion         EventType = "sink_deletion"
 )
 
 type Event struct {
@@ -582,3 +584,28 @@ const (
 	ImagePullTypeImage ImagePullType = "image"
 	ImagePullTypeLayer ImagePullType = "layer"
 )
+
+type SinkKind string
+
+const (
+	SinkKindSyslog        SinkKind = "syslog"
+	SinkKindLogaggregator SinkKind = "logaggregator"
+)
+
+type Sink struct {
+	ID          string          `json:"id"`
+	Kind        SinkKind        `json:"kind"`
+	HostManaged bool            `json:"host_managed,omitempty"`
+	Config      json.RawMessage `json:"config,omitempty"`
+	CreatedAt   *time.Time      `json:"created_at,omitempty"`
+	UpdatedAt   *time.Time      `json:"updated_at,omitempty"`
+}
+
+type SyslogSinkConfig struct {
+	URL    string `json:"url"`
+	Prefix string `json:"template"`
+}
+
+type LogAggregatorSinkConfig struct {
+	Addr string `json:"addr"`
+}

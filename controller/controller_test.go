@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -672,6 +673,21 @@ func (s *S) TestProviderList(c *C) {
 
 	c.Assert(len(list) > 0, Equals, true)
 	c.Assert(list[0].ID, Not(Equals), "")
+}
+
+func (s *S) TestCreateSink(c *C) {
+	config, _ := json.Marshal(struct {
+		Addr string `json:"addr"`
+	}{"tcp://example.com:514"})
+	in := &ct.Sink{
+		Kind:   ct.SinkKindSyslog,
+		Config: config,
+	}
+	c.Assert(s.c.CreateSink(in), IsNil)
+	c.Assert(in.ID, Not(Equals), "")
+	out, err := s.c.GetSink(in.ID)
+	c.Assert(err, IsNil)
+	c.Assert(out, DeepEquals, in)
 }
 
 func (s *S) TestGetCACertWithAuth(c *C) {

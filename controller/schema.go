@@ -436,6 +436,19 @@ $$ LANGUAGE plpgsql`,
 		$$ LANGUAGE plpgsql`,
 		`CREATE TRIGGER check_artifact_manifest AFTER INSERT ON artifacts FOR EACH ROW EXECUTE PROCEDURE check_artifact_manifest()`,
 	)
+	migrations.Add(27,
+		`CREATE TABLE sink_kinds (name text PRIMARY KEY)`,
+		`INSERT INTO sink_kinds (name) VALUES ('syslog')`,
+		`INSERT INTO event_types (name) VALUES ('sink'), ('sink_deletion')`,
+		`CREATE TABLE sinks (
+			sink_id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+			kind text NOT NULL REFERENCES sink_kinds,
+			config jsonb NOT NULL,
+			created_at timestamptz NOT NULL DEFAULT now(),
+			updated_at timestamptz NOT NULL DEFAULT now(),
+			deleted_at timestamptz
+		)`,
+	)
 }
 
 func migrateDB(db *postgres.DB) error {
