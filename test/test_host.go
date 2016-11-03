@@ -679,3 +679,94 @@ func (s *HostSuite) TestUpdateTags(t *c.C) {
 		t.Fatal("expected tag to be deleted but is still present")
 	}
 }
+
+func (s *HostSuite) TestLogSinks(t *c.C) {
+	// deploy custom logaggregator app
+	client := s.controllerClient(t)
+	logApp := &ct.App{Name: "test-logaggregator"}
+	t.Assert(client.CreateApp(logApp), c.IsNil)
+	release, err := client.GetAppRelease("logaggregator")
+	t.Assert(err, c.IsNil)
+	proc := release.Processes["app"]
+	proc.Env = map[string]string{"SERVICE_NAME": logApp.Name}
+	syslogPort := 55514
+	proc.Ports[1].Port = syslogPort
+	release.Processes["app"] = proc
+	release.ID = ""
+	t.Assert(client.CreateRelease(release), c.IsNil)
+	t.Assert(client.SetAppRelease(logApp.ID, release.ID), c.IsNil)
+	t.Assert(client.PutFormation(&ct.Formation{
+		AppID:     logApp.ID,
+		ReleaseID: release.ID,
+		Processes: map[string]int{"app": 1},
+	}), c.IsNil)
+	defer client.DeleteApp(logApp.ID)
+
+	// add sink to controller
+	config, err := json.Marshal(&ct.SyslogSinkConfig{
+		URL: fmt.Sprintf("tcp://%s.discoverd:%d", logApp.Name, syslogPort),
+	})
+	t.Assert(err, c.IsNil)
+	sink := &ct.Sink{
+		Kind:   ct.SinkKindSyslog,
+		Config: config,
+	}
+	t.Assert(client.CreateSink(sink), c.IsNil)
+	defer client.DeleteSink(sink.ID)
+
+	// create a test app
+	app, release := s.createApp(t)
+	defer client.DeleteApp(app.ID)
+
+	// subscribe to log messages for the test app from the test logaggregator
+	logc, err := logaggc.New(fmt.Sprintf("http://%s.discoverd", logApp.Name))
+	t.Assert(err, c.IsNil)
+	log, err := logc.GetLog(app.ID, &logagg.LogOpts{Follow: true})
+	t.Assert(err, c.IsNil)
+	defer log.Close()
+	msgs := make(chan *logaggc.Message)
+	stream := stream.New()
+	defer stream.Close()
+	go func() {
+		defer close(msgs)
+		dec := json.NewDecoder(log)
+		for {
+			var msg logaggc.Message
+			if err := dec.Decode(&msg); err != nil {
+				stream.Error = err
+				return
+			}
+			select {
+			case msgs <- &msg:
+			case <-stream.StopCh:
+				return
+			}
+		}
+	}()
+
+	// deploy an omni job
+	t.Assert(client.PutFormation(&ct.Formation{
+		AppID:     app.ID,
+		ReleaseID: release.ID,
+		Processes: map[string]int{"omni": 1},
+	}), c.IsNil)
+
+	// wait for syslog message from each host
+	hosts, err := s.clusterClient(t).Hosts()
+	t.Assert(err, c.IsNil)
+	if len(hosts) == 0 {
+		t.Fatal("no hosts found")
+	}
+	received := make(map[string]struct{})
+	for {
+		select {
+		case msg := <-msgs:
+			received[msg.HostID] = struct{}{}
+			if len(received) == len(hosts) {
+				return
+			}
+		case <-time.After(30 * time.Second):
+			t.Fatal("timed out waiting for log messages")
+		}
+	}
+}
